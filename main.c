@@ -90,7 +90,7 @@ void* row_slot(Table* table,uint32_t row_num){
     if(cur_page_here==NULL){
     cur_page_here=table->pages[cur_page_num_here]=malloc(PAGE_SIZE);
   }
-  uint32_t row_offset_here=row_num/ROWS_PER_PAGE;
+  uint32_t row_offset_here=row_num%ROWS_PER_PAGE;
   uint32_t byte_offset_here=ROW_SIZE*row_offset_here;
   return cur_page_here+byte_offset_here;
 }
