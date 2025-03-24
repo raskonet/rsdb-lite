@@ -34,14 +34,19 @@ typedef enum{
 
 typedef struct{
   uint32_t id;
-  char* username[COLUMN_USERNAME_SIZE];
-  char* email[COLUMN_EMAIL_SIZE];
+  char username[COLUMN_USERNAME_SIZE];
+  char email[COLUMN_EMAIL_SIZE];
 }Row;
 
 typedef struct{
   StatementType type;
   Row row_to_insert;
 }Statement;
+
+typedef enum{
+  EXECUTE_SUCCESS,
+  EXECUTE_TABLE_FULL
+}ExecuteResult;
 
 
 const uint32_t ID_SIZE=size_of_attribute(Row,id);
@@ -76,6 +81,9 @@ typedef struct{
 }Table;
 //TABLE DEFINNITION ENDS HERE
 
+void print_row(Row* row){
+  printf("[ %d, %s, %s ]\n",row->id,row->username,row->email);
+}
 void* row_slot(Table* table,uint32_t row_num){
     uint32_t cur_page_num_here=row_num/ROWS_PER_PAGE;
     void* cur_page_here=table->pages[cur_page_num_here];
@@ -86,11 +94,30 @@ void* row_slot(Table* table,uint32_t row_num){
   uint32_t byte_offset_here=ROW_SIZE*row_offset_here;
   return cur_page_here+byte_offset_here;
 }
+
+
+Table* new_table(){
+  Table* table=(Table*)(malloc(sizeof(Table)));
+  for(int i=0;i<TABLE_MAX_PAGES;i++){
+    table->pages[i]=NULL;
+  }
+  table->num_rows=0;
+  return table;
+}
+
+void free_table(Table* table){
+  for(int i=0;table->pages[i];i++){
+    free(table->pages[i]);
+  }
+  free(table);
+}
+
 void print_prompt(){
   printf("db > ");
 }
+
 InputBuffer* new_input_buffer(){
-  InputBuffer* input_buffer=malloc(sizeof(InputBuffer));
+  InputBuffer* input_buffer=(InputBuffer*)malloc(sizeof(InputBuffer));
   input_buffer->buffer=NULL;
   input_buffer->buffer_length=0;
   input_buffer->input_length=0;
@@ -112,9 +139,11 @@ void close_input_buffer(InputBuffer* input_buffer){
   free(input_buffer);
 }
 
-MetaCommandResult do_meta_command(InputBuffer* input_buffer){
+MetaCommandResult do_meta_command(InputBuffer* input_buffer,Table* table){
   if(strcmp(input_buffer->buffer,".exit")==0){
     printf("exiting server..\n");
+    free_table(table);
+    close_input_buffer(input_buffer);
     exit(EXIT_SUCCESS);
   }else{
     return META_COMMAND_UNRECOGNOISED_COMMAND;
@@ -139,28 +168,47 @@ PrepareResult prepare_statement(InputBuffer* input_buffer,Statement* statement){
   return PREPARE_UNRECOGNISED_STATEMENT;
 }
 
-void execute_statement(Statement* statement){
+ExecuteResult execute_insert(Statement* statement,Table* table){
+  if(table->num_rows>=ROWS_PER_TABLE){
+    return EXECUTE_TABLE_FULL;
+  }
+  Row* row_to_insert=&(statement->row_to_insert);
+  serialize_row(row_to_insert,row_slot(table,table->num_rows));
+  table->num_rows+=1;
+  return EXECUTE_SUCCESS;
+}
+
+ExecuteResult execute_select(Statement* statement,Table* table){
+  Row row;
+  for(uint32_t i=0;i<table->num_rows;i++){
+    deserialise_row(row_slot(table,i),&row);
+    print_row(&row);
+  }
+  return EXECUTE_SUCCESS;
+}
+
+ExecuteResult execute_statement(Statement* statement,Table* table){
   switch(statement->type){
     case(STATEMENT_INSERT):
-      printf("something something inserting...\n");
+      return execute_insert(statement,table);
       break;
     
     case(STATEMENT_SELECT):
-      printf("something something selccting..\n");
+      return execute_select(statement,table);
     break;
     
   }
-
+  
 
 }
-
 int main(int argc,char* argv[]){
+  Table* table=new_table();
  InputBuffer* input_buffer=new_input_buffer();
   while(true){
     print_prompt();
     read_input(input_buffer);
    if(input_buffer->buffer[0]=='.'){
-      switch(do_meta_command(input_buffer)){
+      switch(do_meta_command(input_buffer,table)){
         case(META_COMMAND_SUCCESS):
           printf("something something meta command");
           break;
@@ -176,15 +224,24 @@ int main(int argc,char* argv[]){
         switch(prepare_statement(input_buffer,&statement)){
     case(PREPARE_SUCCESS):
         break;
-      
+      case(PREPARE_SYNTAX_ERROR):
+      printf("cannot recognise command,SYNTAX ERROR. \n");
+      continue;
       case(PREPARE_UNRECOGNISED_STATEMENT):
         printf("Type of statement coudld not be detrmined :- \n");
       printf("look at teh documentation to see the types of statements available..\n");
       continue;
       
     }    
-  execute_statement(&statement);
-  printf("executed..\n");
+  //execute_statement(&statement,table);
+  switch(execute_statement(&statement,table)){
+      case(EXECUTE_SUCCESS):
+      printf("executed ...\n");
+      break;
+      case(EXECUTE_TABLE_FULL):
+      printf("Table full ,could not execute..\n");
+      break;
+    }
   }
 
 }
