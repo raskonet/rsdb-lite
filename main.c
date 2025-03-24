@@ -9,13 +9,6 @@
 #define COLUMN_USERNAME_SIZE 32
 #define COLUMN_EMAIL_SIZE 255
 
-const u32int_t ID_SIZE=size_of_attribute(Row,id);
-const u32int_t USERNAME_SIZE=size_of_attribute(Row,username);
-const u32int_t EMAIL_SIZE=size_of_attribute(Row,email);
-const u32int_t ID_OFFSET=0;
-const u32int_t USERNAME_OFFSET=ID_SIZE+ID_SIZE;
-const u32int_t EMAIL_OFFSET = USERNAME_OFFSET+USERNAME_SIZE;
-const u32int_t ROW_SIZE = EMAIL_SIZE+ID_SIZE+USERNAME_SIZE;
 
 typedef struct{
   char* buffer;
@@ -30,6 +23,7 @@ typedef enum{
 
 typedef enum{
   PREPARE_SUCCESS,
+  PREPARE_SYNTAX_ERROR,
   PREPARE_UNRECOGNISED_STATEMENT
 }PrepareResult;
 
@@ -39,7 +33,7 @@ typedef enum{
 }StatementType;
 
 typedef struct{
-  u32int_t id;
+  uint32_t id;
   char* username[COLUMN_USERNAME_SIZE];
   char* email[COLUMN_EMAIL_SIZE];
 }Row;
@@ -49,6 +43,14 @@ typedef struct{
   Row row_to_insert;
 }Statement;
 
+
+const uint32_t ID_SIZE=size_of_attribute(Row,id);
+const uint32_t USERNAME_SIZE=size_of_attribute(Row,username);
+const uint32_t EMAIL_SIZE=size_of_attribute(Row,email);
+const uint32_t ID_OFFSET=0;
+const uint32_t USERNAME_OFFSET=ID_SIZE+ID_SIZE;
+const uint32_t EMAIL_OFFSET = USERNAME_OFFSET+USERNAME_SIZE;
+const uint32_t ROW_SIZE = EMAIL_SIZE+ID_SIZE+USERNAME_SIZE;
 
 void serialize_row(Row* source, void* destination) {
     memcpy(destination + ID_OFFSET, &(source->id), ID_SIZE);
@@ -64,16 +66,26 @@ void deserialise_row(void* source,Row* destination){
 
 //TABLE STRUCTURE FROM HERE >>>
 #define TABLE_MAX_PAGES 100
-const u32int_t PAGE_SIZE=4096;
-const u32int_t ROWS_PER_PAGE=PAGE_SIZE/ROW_SIZE;
-const u32int_t ROWS_PER_TABLE=TABLE_MAX_PAGES*ROWS_PER_PAGE;
+const uint32_t PAGE_SIZE=4096;
+const uint32_t ROWS_PER_PAGE=PAGE_SIZE/ROW_SIZE;
+const uint32_t ROWS_PER_TABLE=TABLE_MAX_PAGES*ROWS_PER_PAGE;
 
 typedef struct{
-  u32int_t num_rows;
+  uint32_t num_rows;
   void* pages[TABLE_MAX_PAGES];
 }Table;
 //TABLE DEFINNITION ENDS HERE
 
+void* row_slot(Table* table,uint32_t row_num){
+    uint32_t cur_page_num_here=row_num/ROWS_PER_PAGE;
+    void* cur_page_here=table->pages[cur_page_num_here];
+    if(cur_page_here==NULL){
+    cur_page_here=table->pages[cur_page_num_here]=malloc(PAGE_SIZE);
+  }
+  uint32_t row_offset_here=row_num/ROWS_PER_PAGE;
+  uint32_t byte_offset_here=ROW_SIZE*row_offset_here;
+  return cur_page_here+byte_offset_here;
+}
 void print_prompt(){
   printf("db > ");
 }
@@ -113,9 +125,9 @@ PrepareResult prepare_statement(InputBuffer* input_buffer,Statement* statement){
   if(strncmp(input_buffer->buffer,"insert",6)==0){
     statement->type=STATEMENT_INSERT;
     int args_assigned=sscanf(input_buffer->buffer,"insert %d %s %s"
-    ,&statement->row_to_insert.id,state,statement->row_to_insert.username,
+    ,&statement->row_to_insert.id,statement->row_to_insert.username,
     statement->row_to_insert.email);
-    if(args_assgnied<3){
+    if(args_assigned<3){
       return PREPARE_SYNTAX_ERROR;
     }
     return PREPARE_SUCCESS;
